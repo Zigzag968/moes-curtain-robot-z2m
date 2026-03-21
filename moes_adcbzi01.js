@@ -14,8 +14,7 @@ const tzLocal = {
             const lookup = invert
                 ? {open: 'downClose', close: 'upOpen', stop: 'stop'}
                 : {open: 'upOpen', close: 'downClose', stop: 'stop'};
-            const val = lookup[value.toLowerCase()];
-            await entity.command('closuresWindowCovering', val, {}, {disableDefaultResponse: false});
+            await entity.command('closuresWindowCovering', lookup[value.toLowerCase()], {}, {disableDefaultResponse: false});
         },
     },
     cover_position: {
@@ -26,7 +25,8 @@ const tzLocal = {
                 {percentageliftvalue: position}, {disableDefaultResponse: false});
         },
         convertGet: async (entity, key, meta) => {
-            await entity.read('closuresWindowCovering', ['currentPositionLiftPercentage']);
+            // Do NOT read from ZCL — the device returns stale/wrong values.
+            // Position updates come from spontaneous attributeReports only.
         },
     },
     start_calibration: {
@@ -44,8 +44,7 @@ const fzLocal = {
         convert: (model, msg, publish, options, meta) => {
             const result = {};
             if (msg.data.currentPositionLiftPercentage !== undefined) {
-                const value = msg.data.currentPositionLiftPercentage;
-                result.position = 100 - value;
+                result.position = 100 - msg.data.currentPositionLiftPercentage;
                 result.state = result.position > 0 ? 'OPEN' : 'CLOSE';
             }
             return result;
@@ -90,6 +89,8 @@ const definition = {
     meta: {
         tuyaDatapoints: [
             [1, 'state', tuya.valueConverterBasic.lookup({'open': tuya.enum(0), 'stop': tuya.enum(1), 'close': tuya.enum(2)})],
+            [2, null, null],
+            [3, null, null],
             [7, 'work_state', workStateConverter],
             [10, 'total_time', tuya.valueConverter.raw],
             [13, 'battery', tuya.valueConverter.raw],

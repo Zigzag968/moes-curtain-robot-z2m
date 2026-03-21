@@ -2,7 +2,7 @@
 
 External converter for the **Moes ADP-ADCBZI01-W Curtain Robot** on Zigbee2MQTT.
 
-Without this converter, the device is detected as a generic **TS030F / Tuya "Smart blind controller"** with broken position reporting and no calibration support.
+Without this converter, the device is detected as a generic **TS030F / Tuya "Smart blind controller"** with broken position reporting, no calibration, and no HomeKit compatibility.
 
 ## Device Info
 
@@ -12,59 +12,72 @@ Without this converter, the device is detected as a generic **TS030F / Tuya "Sma
 | Vendor | Moes |
 | Zigbee Model ID | `TS030F` |
 | Manufacturer Name | `_TZ3210_sxtfesc6` |
-| Type | EndDevice (battery powered) |
+| Type | EndDevice (battery powered, 3x AA) |
+| Protocol | Hybrid: ZCL `closuresWindowCovering` + Tuya `manuSpecificTuya` |
 
 ## Tested Setup
 
 - Raspberry Pi 4 running Homebridge
 - Zigbee2MQTT 1.40.2 in Docker (`koenkk/zigbee2mqtt`)
 - Mosquitto MQTT in Docker
-- HomeKit integration via Homebridge + Zigbee2MQTT
+- HomeKit integration via Homebridge + zigbee2mqtt plugin
+
+---
 
 ## Installation
 
-1. Copy `moes_adcbzi01.js` to your Zigbee2MQTT data directory under `external_converters/`:
+### 1. Copy the converter
 
 ```bash
 cp moes_adcbzi01.js /path/to/zigbee2mqtt-data/external_converters/
 ```
 
-2. Add the converter to your `configuration.yaml`:
+### 2. Reference it in `configuration.yaml`
 
 ```yaml
 external_converters:
   - external_converters/moes_adcbzi01.js
 ```
 
-> **Note:** The path is relative to the data directory. Do **not** use just the filename — Zigbee2MQTT will look in the data root and fail with `ENOENT`.
+> **Important:** The path is relative to the z2m data directory. Using just `moes_adcbzi01.js` will fail with `ENOENT` — you must include the `external_converters/` prefix.
 
-3. Restart Zigbee2MQTT.
+### 3. Use `.js` format (CommonJS)
 
-The device should now appear as **Moes Curtain Robot (ADP-ADCBZI01-W)**.
+Zigbee2MQTT 1.40.x loads external converters via `require()`. A `.mjs` (ESM) file will fail silently or with `Cannot find module`. Always use `.js` with `module.exports`.
 
-## Calibration
+### 4. Restart Zigbee2MQTT
 
-The device must be calibrated to know the full travel distance of your curtain rail. **Without calibration, the motor will only travel a short distance.**
+```bash
+docker compose restart zigbee2mqtt
+```
 
-### Calibration procedure (via Zigbee2MQTT)
+The device should now appear as **Moes Curtain Robot (ADP-ADCBZI01-W)** instead of the generic TS030F. No need to re-pair if it was already joined.
 
-1. Physically position the curtain at the **fully open** end of the rail
-2. In Zigbee2MQTT Exposes, click **Start calibration** → `start`
-3. The motor starts running toward the closed position
-4. When the curtain reaches the **fully closed** position, click **STOP**
-5. The device saves the travel time automatically (visible in `total_time`)
+---
 
-> **Warning:** Do not send OPEN/CLOSE/STOP commands during normal operation unless the curtain has reached its target position. Sending STOP mid-travel will recalibrate the total travel time with the shorter distance, causing the device to only cover a partial range.
+## User Guide
 
-### Adjusting travel time manually
+### First-time setup
 
-You can also read and write the `total_time` value directly (in milliseconds). This lets you fine-tune the calibration without re-running the full procedure.
+After installing the converter, you need to:
 
-## Motor Direction / `invert_cover`
+1. **Determine motor direction** — send `state: OPEN` from z2m. If the curtain physically closes, set `invert_cover: true` (see [Motor Direction](#motor-direction--invert_cover)).
+2. **Calibrate the travel distance** — without calibration, the motor will only cover a fraction of your curtain rail (see [Calibration](#calibration)).
+3. **Test from HomeKit** — verify that open/close and position control work correctly from the Home app.
 
-Depending on how the robot is mounted (motor facing indoor/outdoor, open side left/right), the OPEN and CLOSE commands may be physically reversed.
+### Motor Direction / `invert_cover`
 
-Use the `invert_cover` device option to fix this:
+Depending on how the robot is physically mounted on your rail (motor facing indoor vs outdoor, open side left vs right), the OPEN and CLOSE commands may be reversed.
+
+**How to check:**
+
+1. Make sure `invert_cover` is not set (defaults to `false`)
+2. Send `state: OPEN` from the z2m frontend
+3. Observe the curtain:
+   - If it **opens** → leave `invert_cover: false`
+   - If it **closes** → set `invert_cover: true`
+
+**To set `invert_cover`**, add it to your device config in `configuration.yaml`:
 
 ```yaml
 devices:
@@ -73,80 +86,136 @@ devices:
     invert_cover: true
 ```
 
-When `invert_cover` is `true`:
-- The OPEN/CLOSE ZCL commands are swapped
-- The `work_state` labels (opening/closing) are swapped to match
+When `invert_cover: true`:
+- OPEN/CLOSE ZCL commands are swapped
+- `work_state` labels (opening/closing) are swapped to match
+- Position mapping stays the same: **0% = closed, 100% = open** (HomeKit convention)
 
-**Position mapping** (`0% = closed`, `100% = open`) is always consistent regardless of `invert_cover` and follows the HomeKit convention.
+> **Note:** This device does not support software-based motor direction control via Tuya datapoints (DPs 5, 8, 16 were tested and are not implemented). The `invert_cover` z2m option is the only way to handle reversed motor direction.
 
-### How to determine if you need `invert_cover`
+### Calibration
 
-1. Set `invert_cover: false` (default)
-2. Send `state: OPEN` from Zigbee2MQTT
-3. If the curtain physically **closes** instead of opening → set `invert_cover: true`
+The device needs to learn the full travel distance of your curtain rail. **Without calibration, the motor will stop after a few seconds, covering only a fraction of the rail.**
 
-## Exposed Features
+#### Calibration procedure
+
+1. **Position the curtain** at the fully **open** end of the rail (100% open)
+2. In the z2m frontend, go to the device's Exposes tab
+3. Click **Start calibration** → select `start`
+4. The motor starts running toward the closed position
+5. **Watch the curtain** — when it reaches the fully **closed** position, click **STOP**
+6. The device saves the travel time automatically — you can see it in `total_time`
+
+#### Important warnings
+
+- **Do not send OPEN/CLOSE/STOP commands while the curtain is still moving to its target position.** Sending STOP mid-travel will recalibrate `total_time` with the shorter distance, and subsequent movements will only cover a partial range.
+- If you accidentally recalibrate with the wrong distance, just re-run the calibration procedure.
+- You can also manually edit `total_time` (in milliseconds) to fine-tune.
+
+### Exposed Features
 
 | Feature | Access | Description |
 |---|---|---|
-| `position` | Read/Write | Curtain position (0% closed – 100% open) |
+| `position` | Read/Write | Curtain position (0% = closed, 100% = open) |
 | `state` | Write | OPEN / STOP / CLOSE |
 | `battery` | Read | Battery level (%) |
 | `work_state` | Read | standby / opening / closing |
 | `charging_status` | Read | none / uncharged / charging / charged |
-| `illuminance` | Read | Ambient light level |
-| `total_time` | Read/Write | Calibrated travel time (ms) |
-| `start_calibration` | Write | Trigger calibration run |
+| `illuminance` | Read | Ambient light level (snapshot, not real-time) |
+| `total_time` | Read/Write | Calibrated travel time in milliseconds |
+| `start_calibration` | Write | Trigger a calibration run |
 
-## Key Differences from the Original Converter
+### Battery-powered device behavior
 
-The converter from [Zigbee2MQTT issue #24605](https://github.com/Koenkk/zigbee2mqtt/issues/24605) has several issues that this version fixes:
+This device is a **Zigbee EndDevice** on battery. This means:
 
-### 1. Position state conflict (HomeKit desync)
+- **It sleeps most of the time** — it only wakes up during movement or periodic check-ins.
+- **`battery`, `charging_status`, and `illuminance` update infrequently** — reported during full data dumps (startup, after calibration), not during every movement.
+- **`illuminance` is a snapshot**, not a real-time sensor.
+- **`position` and `work_state` update during movement** in real-time.
+- **After a z2m restart**, values may show as `N/A` until the device wakes up. Send a command to wake it.
 
-The original converter maps **both** Tuya DP 2 and DP 3 to `position`:
+### HomeKit specifics
 
-```javascript
-[2, 'position', tuya.valueConverter.coverPosition],
-[3, 'position', tuya.valueConverter.coverPositionInverted],
-```
+- **Position**: 0% = closed, 100% = open — follows HomeKit convention.
+- **Battery**: Appears in HomeKit as battery level. May require a Homebridge restart to show after first setup.
+- **`charging_status`, `illuminance`, `work_state`**: Visible only in the z2m frontend (no HomeKit equivalent).
 
-The device reports position via the standard ZCL `closuresWindowCovering` cluster **and** via Tuya DP 3 with a different value. DP 3 overwrites the correct position, causing HomeKit to show wrong values (e.g., snapping to 0%).
+---
 
-**Fix:** This converter removes DP 2 and DP 3. Position is handled exclusively by the ZCL cluster via a custom `fromZigbee` converter.
+## Technical Details
 
-### 2. OPEN/CLOSE direction
+### Why not use the original converter from issue #24605?
 
-The device's ZCL `upOpen` and `downClose` commands may be physically reversed depending on installation. The original converter has no way to fix this.
+The converter from [Zigbee2MQTT issue #24605](https://github.com/Koenkk/zigbee2mqtt/issues/24605) has several critical issues:
 
-**Fix:** Custom `toZigbee` converter for `state` that respects `invert_cover`.
+#### 1. Position state conflict (HomeKit desync)
 
-### 3. Position commands from HomeKit
+The original maps both Tuya DP 2 and DP 3 to `position`, but the device also reports position via the ZCL `closuresWindowCovering` cluster. DP 3 overwrites the correct ZCL position, causing HomeKit to show wrong values.
 
-HomeKit sends position commands (`goToLiftPercentage`), not state commands. The original converter doesn't handle position inversion for these.
+**Fix:** DP 2 and DP 3 are explicitly ignored (`null`). Position is handled exclusively via ZCL `attributeReport`.
 
-**Fix:** Custom `toZigbee` converter for `position` with proper `100 - value` mapping and `convertGet` support for HomeKit polling.
+#### 2. Device returns wrong position on ZCL read
 
-### 4. Missing calibration
+The device has a firmware bug: reading `currentPositionLiftPercentage` via ZCL always returns 0, regardless of actual position. Only spontaneous `attributeReport` messages during movement contain correct values. A `convertGet` that reads this attribute causes HomeKit to overwrite the correct position with 0 (displayed as 100% open).
+
+**Fix:** `convertGet` for position is a no-op — it does not issue a ZCL read. Position is only updated from spontaneous device reports.
+
+#### 3. No motor direction control
+
+The original converter has no way to handle reversed OPEN/CLOSE commands.
+
+**Fix:** Custom `toZigbee` state converter that respects the `invert_cover` z2m option.
+
+#### 4. No calibration
 
 The original converter has no way to calibrate the travel distance.
 
-**Fix:** `start_calibration` expose that triggers the device's calibration mode via `tuyaMotorReversal`.
+**Fix:** `start_calibration` expose and writable `total_time`.
 
-## Format
+### Unsupported features
 
-Use `.js` (CommonJS) — Zigbee2MQTT 1.40.x loads external converters via `require()`. A `.mjs` file will fail with `Cannot find module`.
+The following features from the generic TS030F definition do **not work** on this device (all return `UNSUPPORTED_ATTRIBUTE`):
+
+- `border` (cluster `0xe001`)
+- `calibration_time` (ZCL `moesCalibrationTime`)
+- `motor_reversal` as a simple toggle (triggers a calibration run instead)
+
+Tuya datapoints 5, 8, and 16 (motor direction and borders on other Tuya curtain devices) were probed and are **not implemented** on this device.
+
+### Tuya Datapoints Map
+
+| DP | Name | Description |
+|---|---|---|
+| 1 | state | open(0) / stop(1) / close(2) — not used for control, ZCL is used |
+| 2 | — | Ignored (position conflicts with ZCL) |
+| 3 | — | Ignored (inverted position conflicts with ZCL) |
+| 7 | work_state | standby(0) / opening(1) / closing(2) |
+| 10 | total_time | Calibrated travel time in ms |
+| 13 | battery | Battery level 0–100% |
+| 101 | charging_status | none(0) / uncharged(1) / charging(2) / charged(3) |
+| 107 | illuminance | Ambient light level (raw) |
+
+---
 
 ## Troubleshooting
 
-- **Set `log_level: debug`** temporarily if you need to troubleshoot — the default `error` level won't show converter loading or device messages.
-- **If the device was already paired** as a generic TS030F, a restart of Zigbee2MQTT should be enough — no need to re-pair.
-- **If `total_time` seems wrong** (motor stops too early or too late), re-run the calibration procedure.
-- **If position shows N/A** after restart, wake the device by pressing its physical button or sending a command.
+| Problem | Solution |
+|---|---|
+| Device shows as generic "TS030F" | Check `external_converters` path in config, restart z2m |
+| Converter not loading | Use `.js` (CommonJS), not `.mjs` |
+| `ENOENT` error | Use `external_converters/moes_adcbzi01.js` as path, not just the filename |
+| Motor goes the wrong way | Set `invert_cover: true` in device config |
+| Motor only covers part of the rail | Run the calibration procedure |
+| Position jumps to 100% after movement | Update to the latest converter (fixes ZCL read bug) |
+| Values show N/A after restart | Send a command to wake the device |
+| Battery not in HomeKit | Restart Homebridge |
+| Illuminance doesn't update | Normal — battery device reports infrequently |
+| `No converter for 'get'` errors | Update to the latest converter |
 
 ## Credits
 
-Based on the converter from [Zigbee2MQTT issue #24605](https://github.com/Koenkk/zigbee2mqtt/issues/24605), with fixes for HomeKit compatibility, calibration, and motor direction.
+Based on the converter from [Zigbee2MQTT issue #24605](https://github.com/Koenkk/zigbee2mqtt/issues/24605), with extensive fixes for HomeKit compatibility, position reporting, calibration, and motor direction.
 
 ## License
 
