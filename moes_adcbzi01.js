@@ -95,7 +95,7 @@ const definition = {
             [10, 'total_time', tuya.valueConverter.raw],
             [13, 'battery', tuya.valueConverter.raw],
             [101, 'charging_status', tuya.valueConverterBasic.lookup({'none': 0, 'uncharged': 1, 'charging': 2, 'charged': 3})],
-            [107, 'illuminance', tuya.valueConverter.raw],
+            [107, 'illuminance', {from: (v) => v * 100, to: (v) => v / 100}],
         ],
     },
 };
