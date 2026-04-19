@@ -66,23 +66,13 @@ if (!illumEntry) {
         const meta = {device: {manufacturerName: '_TZ3210_sxtfesc6'}};
         const options = {};
 
-        assertNotNaN('from(94) plein jour', converter.from(94, meta, options));
-        assertNotNaN('from(60) nuit+lampes', converter.from(60, meta, options));
-        assertNotNaN('from(0) nuit noire', converter.from(0, meta, options));
-        assert('from(0) equals 0', converter.from(0, meta, options), 0);
-
-        // Verify value is reasonable (not raw, should be scaled)
-        const fullDaylight = converter.from(94, meta, options);
-        if (fullDaylight > 94) {
-            console.log(`  PASS: value is scaled (94 => ${fullDaylight})`);
-            passed++;
-        } else if (fullDaylight === 94) {
-            console.log(`  INFO: value is raw/unscaled (94 => 94)`);
-            passed++;
-        } else {
-            console.log(`  FAIL: unexpected scaling (94 => ${fullDaylight})`);
-            failed++;
-        }
+        // DP 107 is already in lux (raw). Cross-checked against another
+        // sensor: ~36 raw near a window at night matches ~30 lux on a
+        // hallway sensor with city light.
+        assert('from(94) plein jour', converter.from(94, meta, options), 94);
+        assert('from(60) nuit+lampes', converter.from(60, meta, options), 60);
+        assert('from(36) nuit fenetre', converter.from(36, meta, options), 36);
+        assert('from(0) nuit noire', converter.from(0, meta, options), 0);
     } else {
         console.log('  FAIL: illuminance converter has no from()');
         failed++;
